@@ -1,0 +1,7 @@
+ERROR:__main__:city url:http://www.cargoyellowpages.com/en/algeria/oran/
+ERROR:__main__:pagination url:http://www.cargoyellowpages.com/en/algeria/oran/page_01.html
+ERROR:__main__:city url:http://www.cargoyellowpages.com/en/algeria/oran/
+ERROR:__main__:pagination url:http://www.cargoyellowpages.com/en/algeria/oran/page_01.html
+ERROR:__main__:pagination_urls:['http://www.cargoyellowpages.com/en/algeria/oran/page_01.html']
+ERROR:__main__:n_info_processed:105
+ERROR:__main__:n_pagination_urls_processed:23
