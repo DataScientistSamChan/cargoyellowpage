@@ -203,7 +203,7 @@ class RetryUrlDict():
                     self.remove_succeed_url(url)
                 i_url += 1
             except self.exceptions as e:
-                logger.info('Timeout, Sleeping %ss'%t)
+                logger.info('Timeout, Sleeping %ss'%self.interval())
                 time.sleep(self.interval())
 
                 if retry_left <= 0:
