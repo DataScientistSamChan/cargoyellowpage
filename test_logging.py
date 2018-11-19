@@ -1,9 +1,9 @@
 import logging
-LOG_NAME = 'log.txt'
+LOG_NAME = 'test_log.txt'
 FORMAT = '%(asctime)s  - %(levelname)s - %(message)s'
 logging.basicConfig(filename=LOG_NAME,level=logging.INFO,format=FORMAT)
 logger = logging.getLogger(__name__)
-logger.info('asdfsadf He'.encode('utf8'))
+logger.info(('asdfsadf He %s'%Exception).encode('utf8'),)
 
 # FORMAT = '%(asctime)-15s %(clientip)s %(user)-8s %(message)s'
 # logging.basicConfig(format=FORMAT)

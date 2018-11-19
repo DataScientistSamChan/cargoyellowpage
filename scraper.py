@@ -172,7 +172,10 @@ class RetryUrlDict():
         return random_url,retry_left
 
     def remove_succeed_url(self, url):
-        self.retry_dict.pop(url)
+        try:
+            self.retry_dict.pop(url)
+        except KeyError:
+            pass
 
     def add_failed_url(self, url):
         self.failed_urls.append(url)
@@ -198,10 +201,15 @@ class RetryUrlDict():
 
         logger.info('Processing %s Url Start'%self.url_name)
         while threads or self:
+            print('Checking for Dead Threads')
             for thread in threads:
                 if not thread.is_alive():
+                    print('Dead Thread removed')
                     threads.remove(thread)
+            
+            
             while len(threads) < self.max_threads and self:
+                print('Spawning new threads %s'%(len(threads) + 1))
                 thread = threading.Thread(target=self.process_url_worker)
                 thread.setDaemon(True) # set daemon so main thread can exit when receives ctrl-c
                 thread.start()
@@ -210,50 +218,51 @@ class RetryUrlDict():
             # all threads have been processed
             # sleep temporarily so CPU can focus execution on other threads
             # SLEEP_TIME=1
+            print('Sleeping for CPU execution')
             time.sleep(1)
 
         logger.info('Processing %s Url End'%self.url_name)
+        print('process_url_results:%s'%len(self.get_results()))
 
-    def process_url_worker(self):
-        n_urls = len(self)
+    def process_url_worker(self):        
         
         while True:
+            n_urls = len(self)
             try:
                 with lock:
                     url, retry_left = self.pop()
-                self.logger.info('Processing %s url:%s/%s '%(self.url_name, n_urls,
-                    self.n_urls))
+                self.logger.info('Processing %s url:%s/%s %s'%(self.url_name, n_urls,
+                    self.n_urls, url))
             except IndexError:
                 # 没有url了
                 break
             
             try:
-                ret = self.process_url(url,i_url,self.logger, round(self.interval() ,2))
+                ret = self.process_url(url,n_urls,self.logger, round(self.interval() ,2))
                 logger.info('%s successfully processed:%s'%(self.url_name, url))
                 with lock:
                     self.process_url_results.append(ret)
                     if retry_left > 0:
                         self.remove_succeed_url(url)
-                i_url += 1
             except self.exceptions as e:
                 logger.info('Timeout, Sleeping %ss'%round(self.interval(), 2))
                 time.sleep(self.interval())
-
-                if retry_left <= 0:
+                
+            except Exception as e:
+                logger.error('Exception url:%s, %s'%(url,e))
+                
+            if retry_left <= 0:
                     self.add_failed_url(url)
                     logger.info('%s url failed: %s'%(self.url_name, url))
-                continue
-        
-            
                 
     def get_results(self):
         return self.process_url_results
 
-    
 
 def process_pagination_url(pagination_url, i_url, logger, interval):
     info_list = handle_url(pagination_url)
-    self.logger.info('Sample:%s'%str(info_list[:1]).encode('utf8'))
+    logger.info('Sample:%s'%str(info_list[:1]).encode('utf8'))
+    return info_list
 
 def process_country_url(country_url, i_url, logger, interval):
     city_urls = get_city_urls(country_url)
@@ -305,12 +314,12 @@ def handle_country_urls(csv_file_path, country_urls, pagination_urls=None):
                                             )
     retry_country_url_dict.process_urls()
     nested_pagination_url_lis = retry_country_url_dict.get_results() 
-    pagination_urls = [i for lis in nested_lis for i in lis]
+    pagination_urls_from_country = [i for lis in nested_pagination_url_lis for i in lis]
     failed_country_urls = retry_country_url_dict.get_failed_urls()
 
     retry_pagination_url_dict = RetryUrlDict(process_url=process_pagination_url,
                                             logger = logger,
-                                            url_list=pagination_urls, 
+                                            url_list=pagination_urls_from_country, 
                                             retry=URL_RETRY,
                                             url_name='Pagination',
                                             interval=SLEEPING_INTERVAL
@@ -319,6 +328,7 @@ def handle_country_urls(csv_file_path, country_urls, pagination_urls=None):
         retry_pagination_url_dict.add_urls(pagination_urls)
     retry_pagination_url_dict.process_urls()
     nested_info_lis = retry_pagination_url_dict.get_results()
+    
     info_results = [i for lis in nested_info_lis for i in lis]
     failed_pagination_urls = retry_pagination_url_dict.get_failed_urls()
 
@@ -387,13 +397,13 @@ def main(country_urls=None, pagination_urls=None, n_test_country_urls=None):
     logger.info('Main End')
 if __name__ == '__main__':
     test = 0
-    n_test_country_urls = 10
+    n_test_country_urls = 0
     if test:
         if n_test_country_urls:
             main(n_test_country_urls=n_test_country_urls)
         else:
-            country_urls=['http://www.cargoyellowpages.com/en/mauritius/',
-                        'http://www.cargoyellowpages.com/en/kazakhstan/']
+            country_urls=[#'http://www.cargoyellowpages.com/en/mauritius/',
+                        ]#'http://www.cargoyellowpages.com/en/kazakhstan/'
             pagination_urls=['http://www.cargoyellowpages.com/en/brazil/curitiba/page_02.html',
                             ]
             main(country_urls=country_urls, pagination_urls=pagination_urls)
