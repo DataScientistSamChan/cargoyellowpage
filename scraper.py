@@ -23,7 +23,7 @@ HEADERS =  {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTM
               ,'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.6,en;q=0.4,zh-TW;q=0.2'
               ,'Connection': 'keep-alive'
               ,'Cache-Control': 'no-cache'}
-SLEEPING_INTERVAL = 2
+SLEEPING_INTERVAL = lambda:random.random()
 CSV_FILE_PATH = 'info.csv'
 LOG_NAME = 'log.txt'
 URL_RETRY = 2
@@ -192,15 +192,15 @@ class RetryUrlDict():
         i_url = 0
         logger.info('Processing %s Url Start'%self.url_name)
         while self.retry_dict:
-            url, retry_left = self.retry_dict.pop()
+            url, retry_left = self.pop()
             self.logger.info('Processing %s url:%s/%s '%(self.url_name, i_url + 1,
                 n_urls))
             try:
                 ret = self.process_url(url,i_url,self.logger, self.interval())
                 self.process_url_results.append(ret)
-                logger.info('%s successfully processed:%s'%url)
+                logger.info('%s successfully processed:%s'%(self.url_name, url))
                 if retry_left > 0:
-                    retry_country_url_dict.remove_succeed_url(country_url)
+                    self.remove_succeed_url(url)
                 i_url += 1
             except self.exceptions as e:
                 logger.info('Timeout, Sleeping %ss'%t)
@@ -208,7 +208,7 @@ class RetryUrlDict():
 
                 if retry_left <= 0:
                     self.add_failed_url(url)
-                    logger.info('%s url failed: %s'%(%self.url_name, url))
+                    logger.info('%s url failed: %s'%(self.url_name, url))
                 continue
         logger.info('Processing %s Url End'%self.url_name)
 
@@ -262,7 +262,7 @@ def handle_country_urls(csv_file_path, country_urls, pagination_urls=None):
     n_countries = len(country_urls)
     logger.info('Number of Countries:%s'%n_countries)
 
-    retry_pagination_url_dict = RetryUrlDict(process_url=process_country_url,
+    retry_country_url_dict = RetryUrlDict(process_url=process_country_url,
                                             logger = logger,
                                             url_list=country_urls, 
                                             retry=URL_RETRY,
