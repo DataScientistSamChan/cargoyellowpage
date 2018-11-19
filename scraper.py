@@ -173,6 +173,10 @@ class RetryUrlDict():
     def __bool__(self):
         return bool(self.retry_dict)
     
+    def __call__(self):
+        self.handle(self.retry_dict)
+    def handle(self):
+        pass
     
 def run_func_with_timeout_retry(func, retry, interval, *args, **kwargs):
     while retry:
