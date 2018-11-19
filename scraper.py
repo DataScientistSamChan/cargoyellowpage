@@ -7,11 +7,10 @@ import random
 import logging
 import sys
 # from timeout import timeout
-from requests.exceptions import ConnectTimeout, ConnectionError
+from requests.exceptions import ConnectTimeout, ConnectionError, ReadTimeout
 from socket import timeout
 from urllib3.exceptions import ReadTimeoutError
-
-
+import threading
 # import codecs
 # sys.stdout = codecs.getwriter('utf8')(sys.stdout)
 # sys.stderr = codecs.getwriter('utf8')(sys.stderr)
@@ -45,6 +44,7 @@ handler_stdout.setLevel(logging.INFO)
 handler_stdout.setFormatter(formatter)
 logger.addHandler(handler_stdout)
 
+lock = threading.Lock()
 
 def get_tree(url, timeout=None):
     response = requests.get(url, headers=HEADERS, timeout=timeout)
@@ -142,23 +142,26 @@ class MaxRetryTimeOutException(Exception):
 
 class RetryUrlDict():
     def __init__(self, process_url, logger, url_list=None, retry=2, 
-                url_name=None, exceptions=None, interval=None):
-        if url_list:
-            self.retry_dict = {i:retry for i in url_list}
-        else:
-            self.retry_dict = {}
+                url_name=None, exceptions=None, interval=None,
+                max_threads=10):
         self.failed_urls = []
         self.retry = retry
         self.process_url = process_url
         self.logger = logger
         self.url_name = url_name
-        if exceptions is None:
-            self.exceptions = (timeout,ConnectTimeout, ConnectionError,
-             ReadTimeoutError)
-        else:
-            self.exceptions = exceptions
         self.interval = interval
         self.process_url_results = []
+        self.max_threads = max_threads
+        if url_list:
+            self.retry_dict = {i:retry for i in url_list}
+        else:
+            self.retry_dict = {}
+        if exceptions is None:
+            self.exceptions = (timeout,ConnectTimeout, ConnectionError,
+             ReadTimeoutError, ReadTimeout)
+        else:
+            self.exceptions = exceptions
+        self.n_urls = len(self)
         
     def pop(self):
         random_url = random.choice(list(self.retry_dict.keys()))
@@ -188,30 +191,61 @@ class RetryUrlDict():
         return bool(self.retry_dict)
     
     def process_urls(self):
-        n_urls = len(self)
-        i_url = 0
+        self.threaded_process_urls()
+
+    def threaded_process_urls(self):
+        threads = []
+
         logger.info('Processing %s Url Start'%self.url_name)
-        while self.retry_dict:
-            url, retry_left = self.pop()
-            self.logger.info('Processing %s url:%s/%s '%(self.url_name, i_url + 1,
-                n_urls))
+        while threads or self:
+            for thread in threads:
+                if not thread.is_alive():
+                    threads.remove(thread)
+            while len(threads) < self.max_threads and self:
+                thread = threading.Thread(target=self.process_url_worker)
+                thread.setDaemon(True) # set daemon so main thread can exit when receives ctrl-c
+                thread.start()
+                threads.append(thread)
+            
+            # all threads have been processed
+            # sleep temporarily so CPU can focus execution on other threads
+            # SLEEP_TIME=1
+            time.sleep(1)
+
+        logger.info('Processing %s Url End'%self.url_name)
+
+    def process_url_worker(self):
+        n_urls = len(self)
+        
+        while True:
             try:
-                ret = self.process_url(url,i_url,self.logger, self.interval())
-                self.process_url_results.append(ret)
+                with lock:
+                    url, retry_left = self.pop()
+                self.logger.info('Processing %s url:%s/%s '%(self.url_name, n_urls,
+                    self.n_urls))
+            except IndexError:
+                # 没有url了
+                break
+            
+            try:
+                ret = self.process_url(url,i_url,self.logger, round(self.interval() ,2))
                 logger.info('%s successfully processed:%s'%(self.url_name, url))
-                if retry_left > 0:
-                    self.remove_succeed_url(url)
+                with lock:
+                    self.process_url_results.append(ret)
+                    if retry_left > 0:
+                        self.remove_succeed_url(url)
                 i_url += 1
             except self.exceptions as e:
-                logger.info('Timeout, Sleeping %ss'%self.interval())
+                logger.info('Timeout, Sleeping %ss'%round(self.interval(), 2))
                 time.sleep(self.interval())
 
                 if retry_left <= 0:
                     self.add_failed_url(url)
                     logger.info('%s url failed: %s'%(self.url_name, url))
                 continue
-        logger.info('Processing %s Url End'%self.url_name)
-
+        
+            
+                
     def get_results(self):
         return self.process_url_results
 
