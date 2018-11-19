@@ -1,7 +1,0 @@
-*.csv
-*.pyc
-__pycache__
-country_url_failed.txt
-log.txt
-pagination_url_failed.txt
-pagination_urls.txt
