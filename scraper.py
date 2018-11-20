@@ -259,21 +259,23 @@ class RetryUrlDict():
         return self.process_url_results
 
 
+def process_country_url(country_url, i_url, logger, interval):
+    city_urls = get_city_urls(country_url)
+    with open('city_urls.txt', 'a',encoding='utf8') as f:
+        f.write('\n'.join(city_urls))
+    return city_urls
+
+def process_city_url(city_url, i_url, logger, interval):
+    pagination_urls = get_pagination_urls(city_url)
+    with open('pagination_urls.txt','a',encoding='utf8') as f:
+        f.write('\n'.join(pagination_urls))
+    return pagination_urls
+
 def process_pagination_url(pagination_url, i_url, logger, interval):
     info_list = handle_url(pagination_url)
     logger.info('Sample:%s'%str(info_list[:1]).encode('utf8'))
     return info_list
 
-def process_country_url(country_url, i_url, logger, interval):
-    city_urls = get_city_urls(country_url)
-    with open('city_urls.txt', 'a',encoding='utf8') as f:
-        f.write('\n'.join(city_urls))
-    pagination_urls_nested = [get_pagination_urls(city_url) for city_url in city_urls]
-    pagination_urls = [i for lis in pagination_urls_nested for i in lis]
-    with open('pagination_urls.txt','a',encoding='utf8') as f:
-        f.write('\n'.join(pagination_urls))
-    return pagination_urls
-    
 def run_func_with_timeout_retry(func, retry, interval, *args, **kwargs):
     while retry:
         try:
@@ -286,7 +288,7 @@ def run_func_with_timeout_retry(func, retry, interval, *args, **kwargs):
                 raise MaxRetryTimeOutException
             continue
 
-def handle_country_urls(csv_file_path, country_urls, pagination_urls=None):
+def handle_country_urls(csv_file_path, country_urls, city_urls=None, pagination_urls=None):
     '''
     Usage:
         传入country_url和pagination_url(optional), 返回抓取到的数据文件的名称,
@@ -313,13 +315,27 @@ def handle_country_urls(csv_file_path, country_urls, pagination_urls=None):
                                             interval=SLEEPING_INTERVAL
                                             )
     retry_country_url_dict.process_urls()
-    nested_pagination_url_lis = retry_country_url_dict.get_results() 
-    pagination_urls_from_country = [i for lis in nested_pagination_url_lis for i in lis]
+    nested_city_url_lis = retry_country_url_dict.get_results()
     failed_country_urls = retry_country_url_dict.get_failed_urls()
 
+    city_urls_from_country = [i for lis in nested_city_url_lis for i in lis]
+    retry_city_url_dict = RetryUrlDict(process_url=process_city_url,
+                                            logger = logger,
+                                            url_list=city_urls_from_country, 
+                                            retry=URL_RETRY,
+                                            url_name='City',
+                                            interval=SLEEPING_INTERVAL
+                                            )
+    if city_urls:
+        retry_city_url_dict.add_urls(city_urls)
+    retry_city_url_dict.process_urls()
+    nested_pagination_url_lis = retry_city_url_dict.get_results() 
+    failed_city_urls = retry_city_url_dict.get_failed_urls()
+    
+    pagination_urls_from_city = [i for lis in nested_pagination_url_lis for i in lis]  
     retry_pagination_url_dict = RetryUrlDict(process_url=process_pagination_url,
                                             logger = logger,
-                                            url_list=pagination_urls_from_country, 
+                                            url_list=pagination_urls_from_city, 
                                             retry=URL_RETRY,
                                             url_name='Pagination',
                                             interval=SLEEPING_INTERVAL
@@ -328,19 +344,18 @@ def handle_country_urls(csv_file_path, country_urls, pagination_urls=None):
         retry_pagination_url_dict.add_urls(pagination_urls)
     retry_pagination_url_dict.process_urls()
     nested_info_lis = retry_pagination_url_dict.get_results()
-    
-    info_results = [i for lis in nested_info_lis for i in lis]
     failed_pagination_urls = retry_pagination_url_dict.get_failed_urls()
-
+    info_results = [i for lis in nested_info_lis for i in lis]
+    
     logger.info('Saving File Final ')
     with open(csv_file_path,'a', encoding='utf8') as f:
         pd.DataFrame(info_results).to_csv(f, header=False, index=False, encoding='utf-8')
     logger.info('File Saved Final ')
     logger.info('Handling country urls End')
 
-    return csv_file_path, failed_country_urls, failed_pagination_urls
+    return csv_file_path, failed_country_urls, failed_city_urls, failed_pagination_urls
 
-def main(country_urls=None, pagination_urls=None, n_test_country_urls=None):
+def main(country_urls=None, city_urls=None, pagination_urls=None, n_test_country_urls=None):
     '''
     '''
     logger.info('Main Start')
@@ -363,7 +378,7 @@ def main(country_urls=None, pagination_urls=None, n_test_country_urls=None):
 
     logger.info('CSV_FILE Created')
 
-    csv_file_path, failed_country_urls, failed_pagination_urls = \
+    csv_file_path, failed_country_urls, failed_city_urls, failed_pagination_urls = \
     handle_country_urls(csv_file_path=csv_file_path, country_urls=country_urls,
                         pagination_urls=pagination_urls)
 
@@ -372,23 +387,29 @@ def main(country_urls=None, pagination_urls=None, n_test_country_urls=None):
         CITY_URL_RETRY_INTERVAL += 5
         PAGINATION_URL_RETRY_INTERVAL += 5
         HANDLE_URL_RETRY_INTERVAL += 5
-        csv_file_path, failed_country_urls, failed_pagination_urls = \
-        handle_country_urls(csv_file_path, failed_country_urls, failed_pagination_urls)
-        if not failed_country_urls and not failed_pagination_urls:
+        csv_file_path, failed_country_urls, failed_city_urls, failed_pagination_urls = \
+        handle_country_urls(csv_file_path, failed_country_urls, failed_city_urls,
+                failed_pagination_urls)
+        if not failed_country_urls and not failed_city_urls and not failed_pagination_urls :
             logger.info('All Urls are handled')
             break
         else:
             logger.info('Remaining failed country urls:%s'%len(failed_country_urls))
+            logger.info('Remaining failed city urls:%s'%len(failed_city_urls))
             logger.info('Remaining failed pagination urls:%s'%len(failed_pagination_urls))
             logger.info('Retrying')
             continue
-
     logger.info('Final Remaining failed country urls:%s'%len(failed_country_urls))
+    logger.info('Final Remaining failed city urls:%s'%len(failed_city_urls))
     logger.info('Final Remaining failed pagination urls:%s'%len(failed_pagination_urls))
 
     logger.info('Writing to country_url_failed.txt')
     with open('country_url_failed.txt', 'w') as f:
         f.write('\n'.join(failed_country_urls))
+
+    logger.info('Writing to city_url_failed.txt')
+    with open('city_url_failed.txt', 'w') as f:
+        f.write('\n'.join(failed_city_urls))
 
     logger.info('Writing to pagination_url_failed.txt')
     with open('pagination_url_failed.txt', 'w') as f:
@@ -396,16 +417,17 @@ def main(country_urls=None, pagination_urls=None, n_test_country_urls=None):
         
     logger.info('Main End')
 if __name__ == '__main__':
-    test = 0
+    test = 1
     n_test_country_urls = 0
     if test:
         if n_test_country_urls:
             main(n_test_country_urls=n_test_country_urls)
         else:
-            country_urls=[#'http://www.cargoyellowpages.com/en/mauritius/',
+            country_urls=['http://www.cargoyellowpages.com/en/mauritius/',
                         ]#'http://www.cargoyellowpages.com/en/kazakhstan/'
+            city_urls = ['http://www.cargoyellowpages.com/en/mauritius/pointe-aux-sables/']
             pagination_urls=['http://www.cargoyellowpages.com/en/brazil/curitiba/page_02.html',
                             ]
-            main(country_urls=country_urls, pagination_urls=pagination_urls)
+            main(country_urls=country_urls, city_urls=city_urls, pagination_urls=pagination_urls)
     else:
         main()
