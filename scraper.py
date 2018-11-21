@@ -323,9 +323,12 @@ def handle_country_urls(csv_file_path, retry_url_dicts):
         3. failed_pagination_urls 失败的最终url(list)
 
     '''
-    logger.info('Handling country urls Start')
-    n_countries = len(country_urls)
-    logger.info('Number of Countries:%s'%n_countries)
+    print(retry_url_dicts)
+    first_dict = retry_url_dicts[0]
+    first_dict_name = first_dict.url_name
+    logger.info('Handling %s urls Start'%first_dict_name)
+    n_urls_first_dict = len(first_dict)
+    logger.info('Number of %s:%s'%(first_dict_name, n_urls_first_dict))
 
     nested_failed_urls_lis = []
     for i, ru_dict in enumerate(retry_url_dicts):
@@ -410,17 +413,17 @@ def main(country_urls=None, city_urls=[], pagination_urls=[],
             retry_url_dicts = get_retry_url_dicts(nested_failed_urls_lis)
             continue
     
-    for i, failed_urls in enumerate(failed_urls_lis):
+    for i, failed_urls_lis in enumerate(nested_failed_urls_lis):
         
-        logger.info('Final Remaining failed %s urls:%s'%(name, len(failed_urls)))
-        logger.info('Writing to level_%s_url_failed.txt'%name)
-        with open('level_%s_url_failed.txt'%name, 'w') as f:
-            f.write('\n'.join(failed_urls))
+        logger.info('Final Remaining failed %s urls:%s'%(name, len(failed_urls_lis)))
+        logger.info('Writing to %s_url_failed.txt'%name)
+        with open('%s_url_failed.txt'%name, 'w') as f:
+            f.write('\n'.join(failed_urls_lis))
 
         
     logger.info('Main End')
 if __name__ == '__main__':
-    test = 1
+    test = 0
     n_test_country_urls = 0
     if test:
         if n_test_country_urls:
