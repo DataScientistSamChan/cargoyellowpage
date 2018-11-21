@@ -32,6 +32,7 @@ CITY_URL_RETRY_INTERVAL = 20
 PAGINATION_URL_RETRY_INTERVAL = 20
 HANDLE_URL_RETRY_INTERVAL = 10
 
+
 formatter = logging.Formatter('%(asctime)s  - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -276,6 +277,25 @@ def process_pagination_url(pagination_url, i_url, logger, interval):
     logger.info('Sample:%s'%str(info_list[:1]).encode('utf8'))
     return info_list
 
+SETUP = [
+            {'process_url':process_country_url,
+                'logger': logger,
+                'retry':URL_RETRY,
+                'url_name': 'Country',
+                'interval': SLEEPING_INTERVAL},
+              {'process_url':process_city_url,
+                'logger': logger,
+                'retry':URL_RETRY,
+                'url_name': 'City',
+                'interval': SLEEPING_INTERVAL},
+              {'process_url':process_pagination_url,
+                'logger': logger,
+                'retry':URL_RETRY,
+                'url_name': 'Pagination',
+                'interval': SLEEPING_INTERVAL},
+            ]
+
+
 def run_func_with_timeout_retry(func, retry, interval, *args, **kwargs):
     while retry:
         try:
@@ -288,7 +308,7 @@ def run_func_with_timeout_retry(func, retry, interval, *args, **kwargs):
                 raise MaxRetryTimeOutException
             continue
 
-def handle_country_urls(csv_file_path, country_urls, city_urls=None, pagination_urls=None):
+def handle_country_urls(csv_file_path, retry_url_dicts):
     '''
     Usage:
         传入country_url和pagination_url(optional), 返回抓取到的数据文件的名称,
@@ -307,62 +327,47 @@ def handle_country_urls(csv_file_path, country_urls, city_urls=None, pagination_
     n_countries = len(country_urls)
     logger.info('Number of Countries:%s'%n_countries)
 
-    retry_country_url_dict = RetryUrlDict(process_url=process_country_url,
-                                            logger = logger,
-                                            url_list=country_urls, 
-                                            retry=URL_RETRY,
-                                            url_name='Country',
-                                            interval=SLEEPING_INTERVAL
-                                            )
-    retry_country_url_dict.process_urls()
-    nested_city_url_lis = retry_country_url_dict.get_results()
-    failed_country_urls = retry_country_url_dict.get_failed_urls()
-
-    city_urls_from_country = [i for lis in nested_city_url_lis for i in lis]
-    retry_city_url_dict = RetryUrlDict(process_url=process_city_url,
-                                            logger = logger,
-                                            url_list=city_urls_from_country, 
-                                            retry=URL_RETRY,
-                                            url_name='City',
-                                            interval=SLEEPING_INTERVAL
-                                            )
-    if city_urls:
-        retry_city_url_dict.add_urls(city_urls)
-    retry_city_url_dict.process_urls()
-    nested_pagination_url_lis = retry_city_url_dict.get_results() 
-    failed_city_urls = retry_city_url_dict.get_failed_urls()
-    
-    pagination_urls_from_city = [i for lis in nested_pagination_url_lis for i in lis]  
-    retry_pagination_url_dict = RetryUrlDict(process_url=process_pagination_url,
-                                            logger = logger,
-                                            url_list=pagination_urls_from_city, 
-                                            retry=URL_RETRY,
-                                            url_name='Pagination',
-                                            interval=SLEEPING_INTERVAL
-                                            )
-    if pagination_urls:
-        retry_pagination_url_dict.add_urls(pagination_urls)
-    retry_pagination_url_dict.process_urls()
-    nested_info_lis = retry_pagination_url_dict.get_results()
-    failed_pagination_urls = retry_pagination_url_dict.get_failed_urls()
-    info_results = [i for lis in nested_info_lis for i in lis]
+    nested_failed_urls_lis = []
+    for i, ru_dict in enumerate(retry_url_dicts):
+        if i > 0:
+            ru_dict.add_urls(flat_ret)
+        ru_dict.process_urls()
+        ret = ru_dict.get_results()
+        failed_urls_lis = ru_dict.get_failed_urls()
+        nested_failed_urls_lis.append(failed_urls_lis)
+        flat_ret = [j for lis in ret for j in lis]
     
     logger.info('Saving File Final ')
     with open(csv_file_path,'a', encoding='utf8') as f:
-        pd.DataFrame(info_results).to_csv(f, header=False, index=False, encoding='utf-8')
+        pd.DataFrame(flat_ret).to_csv(f, header=False, index=False, encoding='utf-8')
     logger.info('File Saved Final ')
     logger.info('Handling country urls End')
 
-    return csv_file_path, failed_country_urls, failed_city_urls, failed_pagination_urls
+    return csv_file_path, nested_failed_urls_lis
+            
+def get_retry_url_dicts(nested_urls_lis, setup=SETUP):
+        
+    for i, url_lis in enumerate(nested_urls_lis):
+        setup[i]['url_list'] = url_lis
 
-def main(country_urls=None, city_urls=None, pagination_urls=None, n_test_country_urls=None):
+    retry_url_dicts = []
+    for dict_ in setup:
+        retry_url_dict =   RetryUrlDict(**dict_
+                                        )
+        retry_url_dicts.append(retry_url_dict)
+    return retry_url_dicts
+    
+
+
+def main(country_urls=None, city_urls=[], pagination_urls=[], 
+        n_test_country_urls=None):
     '''
     '''
     logger.info('Main Start')
 
     global COUNTRY_URL_RETRY_INTERVAL,CITY_URL_RETRY_INTERVAL,\
             PAGINATION_URL_RETRY_INTERVAL,HANDLE_URL_RETRY_INTERVAL
-
+            
     if country_urls is None:
         country_urls = run_func_with_timeout_retry(get_country_urls, retry=10, 
                 interval=COUNTRY_URL_RETRY_INTERVAL)
@@ -370,6 +375,10 @@ def main(country_urls=None, city_urls=None, pagination_urls=None, n_test_country
     if n_test_country_urls:
         country_urls = country_urls[:n_test_country_urls]
 
+    
+    
+    retry_url_dicts = get_retry_url_dicts([country_urls, city_urls, pagination_urls])
+    
     logger.info('Creating CSV_FILE')
     csv_file_path = CSV_FILE_PATH
     # 创建并清除文件内容(if any)
@@ -378,42 +387,36 @@ def main(country_urls=None, city_urls=None, pagination_urls=None, n_test_country
 
     logger.info('CSV_FILE Created')
 
-    csv_file_path, failed_country_urls, failed_city_urls, failed_pagination_urls = \
-    handle_country_urls(csv_file_path=csv_file_path, country_urls=country_urls,
-                        pagination_urls=pagination_urls)
+    csv_file_path, nested_failed_urls_lis = \
+    handle_country_urls(csv_file_path=csv_file_path, retry_url_dicts=retry_url_dicts)
+    
 
     for i in range(MAIN_RETRY):
-        COUNTRY_URL_RETRY_INTERVAL += 5
-        CITY_URL_RETRY_INTERVAL += 5
-        PAGINATION_URL_RETRY_INTERVAL += 5
-        HANDLE_URL_RETRY_INTERVAL += 5
-        csv_file_path, failed_country_urls, failed_city_urls, failed_pagination_urls = \
-        handle_country_urls(csv_file_path, failed_country_urls, failed_city_urls,
-                failed_pagination_urls)
-        if not failed_country_urls and not failed_city_urls and not failed_pagination_urls :
+        if i > 0:
+            COUNTRY_URL_RETRY_INTERVAL += 5
+            CITY_URL_RETRY_INTERVAL += 5
+            PAGINATION_URL_RETRY_INTERVAL += 5
+            HANDLE_URL_RETRY_INTERVAL += 5
+        csv_file_path, nested_failed_urls_lis = \
+        handle_country_urls(csv_file_path, retry_url_dicts)
+        if sum(len(i) for i in nested_failed_urls_lis) <= 0:
             logger.info('All Urls are handled')
             break
         else:
-            logger.info('Remaining failed country urls:%s'%len(failed_country_urls))
-            logger.info('Remaining failed city urls:%s'%len(failed_city_urls))
-            logger.info('Remaining failed pagination urls:%s'%len(failed_pagination_urls))
+            for i, failed_urls_lis in enumerate(nested_failed_urls_lis):
+                name = SETUP[i]['url_name']
+                logger.info('Remaining failed %s urls:%s'%(name, len(failed_urls_lis)))
             logger.info('Retrying')
+            retry_url_dicts = get_retry_url_dicts(nested_failed_urls_lis)
             continue
-    logger.info('Final Remaining failed country urls:%s'%len(failed_country_urls))
-    logger.info('Final Remaining failed city urls:%s'%len(failed_city_urls))
-    logger.info('Final Remaining failed pagination urls:%s'%len(failed_pagination_urls))
+    
+    for i, failed_urls in enumerate(failed_urls_lis):
+        
+        logger.info('Final Remaining failed %s urls:%s'%(name, len(failed_urls)))
+        logger.info('Writing to level_%s_url_failed.txt'%name)
+        with open('level_%s_url_failed.txt'%name, 'w') as f:
+            f.write('\n'.join(failed_urls))
 
-    logger.info('Writing to country_url_failed.txt')
-    with open('country_url_failed.txt', 'w') as f:
-        f.write('\n'.join(failed_country_urls))
-
-    logger.info('Writing to city_url_failed.txt')
-    with open('city_url_failed.txt', 'w') as f:
-        f.write('\n'.join(failed_city_urls))
-
-    logger.info('Writing to pagination_url_failed.txt')
-    with open('pagination_url_failed.txt', 'w') as f:
-        f.write('\n'.join(failed_pagination_urls))
         
     logger.info('Main End')
 if __name__ == '__main__':
